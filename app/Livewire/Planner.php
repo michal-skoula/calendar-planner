@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Models\SyncClient;
 use App\Models\Task;
 use App\Services\TaskService;
 use Carbon\CarbonImmutable;
@@ -140,6 +141,7 @@ class Planner extends Component
         return view('livewire.planner', [
             'inbox' => $this->inbox(),
             'doneToday' => $this->doneToday(),
+            'lastSync' => SyncClient::query()->orderByDesc('last_seen_at')->first(),
         ]);
     }
 

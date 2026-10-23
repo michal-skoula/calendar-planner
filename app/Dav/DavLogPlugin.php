@@ -2,6 +2,7 @@
 
 namespace App\Dav;
 
+use App\Services\SyncLog;
 use Illuminate\Support\Facades\Log;
 use Sabre\DAV\Auth\Plugin as AuthPlugin;
 use Sabre\DAV\Exception\NotAuthenticated;
@@ -45,6 +46,10 @@ final class DavLogPlugin extends ServerPlugin
     public function onBeforeMethod(RequestInterface $request, ResponseInterface $response): void
     {
         $this->startedAt = microtime(true);
+
+        // Names the client for everything downstream. Writes that reach the
+        // backend without one came from our own code, not from a device.
+        app(SyncLog::class)->fromClient($this->shortAgent($request));
     }
 
     public function onAfterMethod(RequestInterface $request, ResponseInterface $response): void
@@ -71,6 +76,17 @@ final class DavLogPlugin extends ServerPlugin
             $status >= 400 && $status !== 401 => Log::channel('dav')->warning($line, $context),
             default => Log::channel('dav')->info($line, $context),
         };
+
+        $sync = app(SyncLog::class);
+        $sync->seen($this->shortAgent($request), $request->getMethod(), $status);
+
+        if ($status >= 500) {
+            $sync->record('error', detail: $request->getMethod().' '.$request->getUrl().' answered '.$status);
+        }
+
+        // Cleared so a later write in the same PHP process is not mistaken for
+        // one from this device.
+        $sync->fromClient(null);
     }
 
     public function onException(\Throwable $e): void

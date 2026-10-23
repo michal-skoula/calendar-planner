@@ -3,6 +3,7 @@
 namespace App\Dav;
 
 use App\Models\Task;
+use App\Services\SyncLog;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Sabre\CalDAV\Backend\PDO as SabrePDO;
@@ -22,8 +23,10 @@ use Sabre\CalDAV\Backend\PDO as SabrePDO;
  */
 final class TaskCalendarBackend extends SabrePDO
 {
-    public function __construct(private readonly VEventMapper $mapper)
-    {
+    public function __construct(
+        private readonly VEventMapper $mapper,
+        private readonly SyncLog $sync,
+    ) {
         parent::__construct(DB::connection()->getPdo());
     }
 
@@ -89,6 +92,8 @@ final class TaskCalendarBackend extends SabrePDO
             // work falls back to the inbox.
             $task->status = $task->isDone() ? Task::STATUS_DONE : Task::STATUS_INBOX;
             $task->save();
+
+            $this->sync->record('unscheduled', $task);
         });
     }
 
@@ -126,6 +131,10 @@ final class TaskCalendarBackend extends SabrePDO
             $task = new Task;
         }
 
+        $isNew = ! $task->exists;
+        $wasScheduled = ! $isNew && $task->getOriginal('status') === Task::STATUS_SCHEDULED;
+        $wasDone = ! $isNew && $task->getOriginal('status') === Task::STATUS_DONE;
+
         $task->ical_uid = $facts->uid;
         $task->title = $facts->title;
         $task->notes = $facts->notes;
@@ -144,7 +153,27 @@ final class TaskCalendarBackend extends SabrePDO
             $task->status = Task::STATUS_SCHEDULED;
         }
 
+        // Read before saving: afterwards everything is clean and the shape of the
+        // change is gone.
+        $movedSpan = $task->isDirty(['starts_at', 'ends_at', 'is_all_day']);
+        $editedDetails = $task->isDirty(['title', 'notes', 'tags']);
+
         $task->save();
+
+        $kind = match (true) {
+            $isNew => 'created',
+            ! $wasScheduled && ! $wasDone => 'scheduled',
+            $facts->isDone && ! $wasDone => 'completed',
+            ! $facts->isDone && $wasDone => 'reopened',
+            $movedSpan => 'moved',
+            $editedDetails => 'edited',
+            // A device re-sending an unchanged event is a poll, not an event.
+            default => null,
+        };
+
+        if ($kind !== null) {
+            $this->sync->record($kind, $task);
+        }
 
         return $task;
     }

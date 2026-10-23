@@ -143,6 +143,29 @@ exist. The plugin redirects both back to the right path, before authentication r
 
 The device must be on the tailnet. There is no route to this host from anywhere else.
 
+### Watching it sync
+
+There is **no push**. Clients poll on a schedule they choose, so a task scheduled in the browser
+does not reach the Mac until its next refresh — macOS sets this at Calendar › Settings › Accounts ›
+Refresh Calendars, iOS at Settings › Apps › Calendar › Accounts › Fetch New Data.
+
+Because of that, "when did it last check in" is the only honest answer to "is it syncing", and it
+is the first thing on **`/sync`**, linked from the dot in the planner header. The page lists every
+client that has connected, when each last checked in and whether that request succeeded, then what
+actually changed — each line saying whether it came from a device or from the planner — with
+sign-in refusals and server errors called out in red.
+
+Two tables back it ([`database/migrations/2026_10_24_120000_create_sync_tables.php`](database/migrations/2026_10_24_120000_create_sync_tables.php)).
+`sync_clients` holds one upserted row per client, so it never grows with traffic and is safe to
+touch on every request. `sync_events` holds only things worth reading — a task changed, or
+something failed — because a row per poll would bury them. A device re-sending an unchanged event
+records nothing. Events are pruned after 30 days.
+
+Writes reach the backend from a device and from the planner's own code through the same methods,
+so [`SyncLog`](app/Services/SyncLog.php) is told the client at the start of each DAV request and
+cleared at the end; no client means our own code was writing. None of this may break a sync, so
+every write is wrapped — a failure to record costs a log line and nothing else.
+
 ### If a device will not connect
 
 First read the log — every DAV request is in it, with the status it answered and the principal

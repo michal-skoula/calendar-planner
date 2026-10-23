@@ -8,6 +8,7 @@ use App\Dav\DavPathAliasPlugin;
 use App\Dav\TaskCalendar;
 use App\Dav\TaskCalendarBackend;
 use App\Dav\VEventMapper;
+use App\Services\SyncLog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 use LaravelSabre\LaravelSabre;
@@ -24,6 +25,10 @@ class DavServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // One instance per request, or the client named at beforeMethod would not
+        // be the one the backend reads when it records what changed.
+        $this->app->singleton(SyncLog::class);
+
         $this->app->singleton(VEventMapper::class);
         $this->app->singleton(TaskCalendar::class);
         $this->app->singleton(TaskCalendarBackend::class);

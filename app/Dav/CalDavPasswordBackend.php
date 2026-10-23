@@ -4,6 +4,7 @@ namespace App\Dav;
 
 use App\Models\User;
 use App\Services\PlannerIdentity;
+use App\Services\SyncLog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Sabre\DAV\Auth\Backend\AbstractBasic;
@@ -99,9 +100,13 @@ final class CalDavPasswordBackend extends AbstractBasic
     /** The address attempted and why it failed. Never the password, never the hash. */
     private function deny(mixed $username, string $reason): void
     {
+        $attempted = (string) $username === '' ? '-' : (string) $username;
+
         Log::channel('dav')->warning('CalDAV auth refused for {username}: {reason}', [
-            'username' => (string) $username === '' ? '-' : (string) $username,
+            'username' => $attempted,
             'reason' => $reason,
         ]);
+
+        app(SyncLog::class)->record('auth_refused', detail: "{$attempted} — {$reason}");
     }
 }

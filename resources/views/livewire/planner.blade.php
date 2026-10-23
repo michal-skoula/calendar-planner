@@ -6,10 +6,24 @@
 
         <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
             <h1 class="text-sm font-semibold tracking-tight">Inbox</h1>
-            <form method="POST" action="{{ route('logout') }}">
-                @csrf
-                <button type="submit" class="text-xs text-stone-400 hover:text-stone-700 dark:hover:text-stone-200">Sign out</button>
-            </form>
+            <div class="flex items-center gap-3">
+                {{-- Clients poll, so this is the only thing that tells you a device
+                     is still talking to the server. --}}
+                <a href="{{ route('sync') }}" wire:navigate title="Sync activity"
+                   class="flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-700 dark:hover:text-stone-200">
+                    <span @class([
+                        'size-1.5 rounded-full',
+                        'bg-teal-600' => $lastSync?->isHealthy(),
+                        'bg-red-500' => $lastSync && ! $lastSync->isHealthy(),
+                        'bg-stone-300 dark:bg-stone-600' => ! $lastSync,
+                    ])></span>
+                    {{ $lastSync ? $lastSync->last_seen_at->diffForHumans(short: true) : 'no sync' }}
+                </a>
+                <form method="POST" action="{{ route('logout') }}">
+                    @csrf
+                    <button type="submit" class="text-xs text-stone-400 hover:text-stone-700 dark:hover:text-stone-200">Sign out</button>
+                </form>
+            </div>
         </div>
 
         <form wire:submit="addTask" class="space-y-2 border-b border-stone-200 px-4 py-3 dark:border-stone-800">

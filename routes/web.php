@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\LoginController;
 use App\Livewire\Planner;
+use App\Livewire\SyncActivity;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/login', [LoginController::class, 'show'])->middleware('guest')->name('login');
@@ -9,6 +10,7 @@ Route::post('/login', [LoginController::class, 'store'])->middleware('guest');
 Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
 Route::get('/', Planner::class)->middleware('auth')->name('planner');
+Route::get('/sync', SyncActivity::class)->middleware('auth')->name('sync');
 
 /*
 | RFC 6764 discovery. Apple Calendar looks here first when you type just the
