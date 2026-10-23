@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly planner backup
+
+[Timer]
+# 04:15 UTC, after Caddy's 04:00, so four container stops do not land on four
+# cores at the same moment.
+OnCalendar=*-*-* 04:15:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
