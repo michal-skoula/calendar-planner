@@ -128,11 +128,18 @@ three fields.
 
 The address is matched case-insensitively, so iOS capitalising the first letter does no harm.
 
-The hostname alone is enough because `/.well-known/caldav` 301-redirects to `/dav`
-([`routes/web.php`](routes/web.php)); that route is excluded from CSRF in
+**Give it the hostname alone, with no `/dav`.** That works because `/.well-known/caldav`
+301-redirects to `/dav` ([`routes/web.php`](routes/web.php)); that route is excluded from CSRF in
 [`bootstrap/app.php`](bootstrap/app.php) because RFC 6764 clients use `PROPFIND` there, not `GET`,
-and a CalDAV client has no CSRF token. If a device refuses the short form, give it the full server
-path `planner.internal.michalskoula.com/dav` instead.
+and a CalDAV client has no CSRF token.
+
+The longer `planner.internal.michalskoula.com/dav` also works, but only because
+[`DavPathAliasPlugin`](app/Dav/DavPathAliasPlugin.php) cleans up after it. Apple's client resolves
+discovery against whatever path you type, so with `/dav` in the field it asks for
+`/dav/.well-known/caldav`, and then — once the root hands back an href of `/dav/principals/…` —
+for `/dav/dav/principals/…`. Both would 404 inside sabre, and **macOS reports that as "Unable to
+verify account name or password"**, which sends you hunting for a credential problem that does not
+exist. The plugin redirects both back to the right path, before authentication runs.
 
 The device must be on the tailnet. There is no route to this host from anywhere else.
 

@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Dav\CalDavPasswordBackend;
 use App\Dav\DavLogPlugin;
+use App\Dav\DavPathAliasPlugin;
 use App\Dav\TaskCalendar;
 use App\Dav\TaskCalendarBackend;
 use App\Dav\VEventMapper;
@@ -48,6 +49,10 @@ class DavServiceProvider extends ServiceProvider
             // One log line per request. Its hooks carry explicit priorities, so it
             // sees both the unauthenticated probe and the status finally answered.
             yield new DavLogPlugin;
+
+            // Before auth, so a misaddressed request is redirected rather than
+            // challenged for credentials it would then be told are wrong.
+            yield new DavPathAliasPlugin;
 
             // Auth first: ACL needs a principal to reason about.
             yield new AuthPlugin($this->app->make(CalDavPasswordBackend::class));

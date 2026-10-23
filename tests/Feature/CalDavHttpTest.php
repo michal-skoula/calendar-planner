@@ -112,6 +112,27 @@ class CalDavHttpTest extends TestCase
         $this->call('PROPFIND', '/.well-known/caldav')->assertRedirect('/dav');
     }
 
+    public function test_a_server_address_carrying_dav_still_discovers(): void
+    {
+        // Apple's client resolves discovery against the path typed into "Server
+        // Address". With `host/dav` in that field it asks for these, both of
+        // which 404'd inside sabre and surfaced on screen as "Unable to verify
+        // account name or password" — a credential error that was not one.
+        $this->call('PROPFIND', '/dav/.well-known/caldav')->assertRedirect('/dav/');
+
+        $this->call('PROPFIND', '/dav'.$this->principalPath())
+            ->assertRedirect($this->principalPath());
+
+        // The redirect is issued before authentication, so an unauthenticated
+        // probe is pointed at the right path rather than told its password is
+        // wrong — which is exactly how this looked on screen.
+        $this->call('PROPFIND', '/dav/dav/')->assertRedirect('/dav/');
+
+        // The real paths still resolve, so nothing legitimate was swallowed.
+        $this->call('PROPFIND', $this->calendarHome(), server: $this->serverHeaders($this->basicAuth()))
+            ->assertStatus(207);
+    }
+
     public function test_a_put_over_http_creates_a_task_and_a_delete_returns_it_to_the_inbox(): void
     {
         $put = $this->call(

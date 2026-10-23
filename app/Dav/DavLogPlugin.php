@@ -80,7 +80,14 @@ final class DavLogPlugin extends ServerPlugin
         // than a fault. Logging it as an error buries the real ones.
         $routine = $e instanceof NotAuthenticated;
 
-        Log::channel('dav')->log($routine ? 'info' : 'error', 'DAV exception {class}: {message}', [
+        // sabre skips afterMethod when a method throws, so without naming the
+        // request here the failures — the only lines anyone reads — say what went
+        // wrong but not what was asked for.
+        $request = $this->server?->httpRequest;
+
+        Log::channel('dav')->log($routine ? 'info' : 'error', 'DAV {method} {path} failed: {class}: {message}', [
+            'method' => $request?->getMethod() ?? '-',
+            'path' => $request?->getUrl() ?? '-',
             'class' => $e::class,
             'message' => $e->getMessage(),
             'file' => $e->getFile().':'.$e->getLine(),

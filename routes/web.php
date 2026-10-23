@@ -17,3 +17,10 @@ Route::get('/', Planner::class)->middleware('auth')->name('planner');
 */
 Route::redirect('/.well-known/caldav', '/dav', 301);
 Route::redirect('/.well-known/carddav', '/dav', 301);
+
+/*
+| Apple's client invents two more paths when the server address carries one of
+| its own; DavPathAliasPlugin absorbs them inside the DAV stack, because
+| laravel-sabre's `dav/{path?}` catch-all is registered before this file and
+| would swallow any route declared here.
+*/
