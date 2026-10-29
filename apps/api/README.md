@@ -52,7 +52,8 @@ Described in full in [`openapi.yaml`](openapi.yaml). Short version:
   `PLANNER_TIMEZONE`, `2026-10-26T09:00:00`. Instants (`completed_at`, `last_seen_at`) are UTC with
   a `Z`. `GET /api/me` says which timezone the wall clock is in.
 - The web app signs in with a session cookie (`POST /api/auth/login`, Sanctum's SPA mode). Any
-  other client gets a bearer token from `POST /api/auth/tokens` or `php artisan planner:token`.
+  other client sends a bearer token, made on the Access tokens page (`/api/tokens`), with
+  `php artisan planner:token`, or by trading the password at `POST /api/auth/tokens`.
 - Clients poll `GET /api/revision` and refetch when it changes. That is how a change made on a
   phone over CalDAV reaches an open browser tab.
 
@@ -308,13 +309,28 @@ table for the reason tasks would: a feed occurrence is a rectangle, not somethin
 
 ---
 
-## The iOS Shortcut
+## Access tokens
 
-Mint a bearer token:
+Everything that is not the web app (the iOS Shortcut, MCP clients, scripts) authenticates with a
+bearer token. Create one on the web app's **Access tokens** page: give it a name, pick an expiry
+(30 days, 90 days, a year, a date of your choosing, or never), and copy the secret from the dialog.
+It is shown once; Sanctum keeps only a SHA-256 hash. The same page lists each token's last use and
+revokes it.
+
+A token has the same access as the account. It cannot create, list or revoke tokens, though:
+[`RequireBrowserSession`](app/Http/Middleware/RequireBrowserSession.php) refuses those requests
+when they carry a bearer token, so a leaked token cannot mint itself a replacement before you
+revoke it.
+
+Without a browser, from the box:
 
 ```bash
-php artisan planner:token shortcut
+php artisan planner:token shortcut --expires=2027-06-30
 ```
+
+## The iOS Shortcut
+
+Create a token named for it, as above.
 
 Then build a Shortcut with a **Get Contents of URL** action:
 
@@ -344,7 +360,8 @@ Eight tools over `TaskService`, called directly rather than through the REST API
 `schedule_task`, `unschedule_task`, `complete_task`, `delete_task`. Datetimes cross the boundary
 as naive local wall clock, so a value read from one tool goes straight into another.
 
-**Claude Code / Claude Desktop, over HTTP** — uses the same bearer token as the Shortcut:
+**Claude Code / Claude Desktop, over HTTP** — with a bearer token of its own from the Access
+tokens page:
 
 ```bash
 claude mcp add --transport http planner https://planner.internal.michalskoula.com/mcp/planner \
@@ -507,6 +524,8 @@ way iOS sends them:
 - A PUT over HTTP advances the sync token and a sync-collection REPORT sees the change.
 - The events feed returns Prague wall clock on both sides of the October DST change.
 - A naive `start` on the Shortcut endpoint is read as local wall clock, not UTC.
+- A token works until its expiry date runs out (end of that day in Prague) or it is revoked, and a
+  bearer token can never create or list tokens.
 - Every `/api` response a test receives matches `openapi.yaml`, and the router and the spec list
   the same endpoints.
 - The web app's routes get the built page, while `/api`, `/dav`, `/up` and `/.well-known` are never

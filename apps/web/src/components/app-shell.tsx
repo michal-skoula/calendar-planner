@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { CalendarDays, CalendarRange, LogOut, RefreshCw } from "lucide-react";
+import { CalendarDays, CalendarRange, KeyRound, LogOut, RefreshCw } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import {
@@ -68,6 +68,9 @@ function Sidebar() {
                 </NavItem>
                 <NavItem to="/sync" icon={<RefreshCw />}>
                     Sync
+                </NavItem>
+                <NavItem to="/tokens" icon={<KeyRound />}>
+                    Access tokens
                 </NavItem>
             </nav>
 

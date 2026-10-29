@@ -73,6 +73,12 @@ export const queries = {
             queryFn: async () => (await api.GET("/api/sync/events")).data!.data,
         }),
 
+    tokens: () =>
+        queryOptions({
+            queryKey: ["tokens"],
+            queryFn: async () => (await api.GET("/api/tokens")).data!.data,
+        }),
+
     revision: () =>
         queryOptions({
             queryKey: ["revision"],
@@ -125,4 +131,10 @@ export const feeds = {
         api.PATCH("/api/feeds/{feed}", { params: { path: { feed: id } }, body }),
     refresh: (id: number) => api.POST("/api/feeds/{feed}/refresh", { params: { path: { feed: id } } }),
     remove: (id: number) => api.DELETE("/api/feeds/{feed}", { params: { path: { feed: id } } }),
+};
+
+export const accessTokens = {
+    create: async (body: { name: string; expires_on?: string | null }) =>
+        (await api.POST("/api/tokens", { body })).data!.data,
+    revoke: (id: number) => api.DELETE("/api/tokens/{token}", { params: { path: { token: id } } }),
 };

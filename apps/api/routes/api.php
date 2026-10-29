@@ -1,9 +1,11 @@
 <?php
 
+use App\Http\Controllers\Api\AccessTokenController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\FeedController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Middleware\RequireBrowserSession;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -43,4 +45,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/sync/clients', [SyncController::class, 'clients']);
     Route::get('/sync/events', [SyncController::class, 'events']);
+
+    // Bearer tokens. Managed from a browser session only, so a leaked token
+    // cannot mint itself a replacement.
+    Route::middleware(RequireBrowserSession::class)->group(function () {
+        Route::get('/tokens', [AccessTokenController::class, 'index']);
+        Route::post('/tokens', [AccessTokenController::class, 'store']);
+        Route::delete('/tokens/{token}', [AccessTokenController::class, 'destroy'])->whereNumber('token');
+    });
 });

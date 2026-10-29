@@ -362,6 +362,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List bearer tokens
+         * @description Newest first. Secrets are never returned; only a hash of each is stored.
+         */
+        get: operations["listTokens"];
+        put?: never;
+        /**
+         * Create a bearer token
+         * @description The response carries the secret, once. It is not retrievable afterwards.
+         *     A token has the same access as the account.
+         */
+        post: operations["createAccessToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tokens/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a bearer token
+         * @description Anything still using it gets a 401 from the next request on.
+         */
+        delete: operations["revokeAccessToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -491,6 +538,20 @@ export interface components {
             /** Format: date-time */
             occurred_at: string;
         };
+        AccessToken: {
+            id: number;
+            name: string;
+            expired: boolean;
+            /**
+             * Format: date-time
+             * @description Null for a token that never expires.
+             */
+            expires_at: string | null;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** Format: date-time */
+            created_at: string | null;
+        };
         Error: {
             message: string;
         };
@@ -526,6 +587,18 @@ export interface components {
         };
         /** @description An error. */
         Error: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description Refused because the request used a bearer token. Tokens are managed from a
+         *     signed-in browser session only, so a leaked token cannot mint another.
+         */
+        BrowserOnly: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1083,6 +1156,95 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AccessToken"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["BrowserOnly"];
+        };
+    };
+    createAccessToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example iOS Shortcut */
+                    name: string;
+                    /**
+                     * Format: date
+                     * @description The last day the token works, through the end of that day in the
+                     *     planner's timezone. Today or later. Omit or null for no expiry.
+                     */
+                    expires_on?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @description The secret, for an `Authorization` header. Shown this once. */
+                            token: string;
+                            access_token: components["schemas"]["AccessToken"];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["BrowserOnly"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    revokeAccessToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["BrowserOnly"];
+            404: components["responses"]["Error"];
         };
     };
 }

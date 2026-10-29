@@ -34,7 +34,8 @@ info:
     with a session cookie: `GET /sanctum/csrf-cookie`, then `POST /api/auth/login`,
     then send the `XSRF-TOKEN` cookie back as an `X-XSRF-TOKEN` header on every
     write. Everything else (desktop apps, the iOS Shortcut, scripts) uses a bearer
-    token from `POST /api/auth/tokens` or `php artisan planner:token`.
+    token. Create one on the web app's Access tokens page (`POST /api/tokens`), with
+    `php artisan planner:token`, or by trading the password at `POST /api/auth/tokens`.
 
     ## Envelope
 
@@ -549,6 +550,91 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/tokens:
+    get:
+      tags: [auth]
+      operationId: listTokens
+      summary: List bearer tokens
+      description: Newest first. Secrets are never returned; only a hash of each is stored.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AccessToken' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/BrowserOnly' }
+    post:
+      tags: [auth]
+      operationId: createAccessToken
+      summary: Create a bearer token
+      description: |
+        The response carries the secret, once. It is not retrievable afterwards.
+        A token has the same access as the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  example: iOS Shortcut
+                expires_on:
+                  type: string
+                  format: date
+                  nullable: true
+                  description: |
+                    The last day the token works, through the end of that day in the
+                    planner's timezone. Today or later. Omit or null for no expiry.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [token, access_token]
+                    properties:
+                      token:
+                        type: string
+                        description: The secret, for an `Authorization` header. Shown this once.
+                      access_token: { $ref: '#/components/schemas/AccessToken' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/BrowserOnly' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/tokens/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema: { type: integer }
+    delete:
+      tags: [auth]
+      operationId: revokeAccessToken
+      summary: Revoke a bearer token
+      description: Anything still using it gets a 401 from the next request on.
+      responses:
+        '204': { description: Revoked }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/BrowserOnly' }
+        '404': { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -594,6 +680,13 @@ components:
               data: { $ref: '#/components/schemas/Feed' }
     Error:
       description: An error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BrowserOnly:
+      description: |
+        Refused because the request used a bearer token. Tokens are managed from a
+        signed-in browser session only, so a leaked token cannot mint another.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -795,6 +888,22 @@ components:
           example: moved from iOS/26.1
         failure: { type: boolean }
         occurred_at: { type: string, format: date-time }
+
+    AccessToken:
+      type: object
+      additionalProperties: false
+      required: [id, name, expired, expires_at, last_used_at, created_at]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        expired: { type: boolean }
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null for a token that never expires.
+        last_used_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time, nullable: true }
 
     Error:
       type: object

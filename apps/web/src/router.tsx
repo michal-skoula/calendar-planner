@@ -5,6 +5,7 @@ import { CalendarsPage } from "@/pages/calendars";
 import { LoginPage } from "@/pages/login";
 import { PlannerPage } from "@/pages/planner";
 import { SyncPage } from "@/pages/sync";
+import { TokensPage } from "@/pages/tokens";
 
 /**
  * Every route in the app, in one file.
@@ -13,6 +14,7 @@ import { SyncPage } from "@/pages/sync";
  *   /            the planner: inbox beside the week
  *   /calendars   subscribed calendars
  *   /sync        what has been syncing
+ *   /tokens      bearer tokens for the Shortcut, MCP and other clients
  *
  * The signed-in routes hang off a layout route that asks the API who you are
  * before anything renders, and sends you to /login on a 401.
@@ -46,8 +48,9 @@ const appRoute = createRoute({
 const plannerRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: PlannerPage });
 const calendarsRoute = createRoute({ getParentRoute: () => appRoute, path: "/calendars", component: CalendarsPage });
 const syncRoute = createRoute({ getParentRoute: () => appRoute, path: "/sync", component: SyncPage });
+const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: "/tokens", component: TokensPage });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([plannerRoute, calendarsRoute, syncRoute])]);
+const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([plannerRoute, calendarsRoute, syncRoute, tokensRoute])]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

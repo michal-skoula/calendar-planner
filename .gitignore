@@ -10,3 +10,6 @@ node_modules/
 
 # The web app's build output. In the image it is copied into apps/api/public.
 /apps/web/dist
+
+# TypeScript incremental build cache.
+*.tsbuildinfo

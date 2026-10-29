@@ -17,6 +17,7 @@ export type FeedEvent = components["schemas"]["FeedEvent"];
 export type SyncClient = components["schemas"]["SyncClient"];
 export type SyncEvent = components["schemas"]["SyncEvent"];
 export type User = components["schemas"]["User"];
+export type AccessToken = components["schemas"]["AccessToken"];
 
 export type PlannerClient = ReturnType<typeof createPlannerClient>;
 
