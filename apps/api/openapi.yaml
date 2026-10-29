@@ -1,0 +1,814 @@
+openapi: 3.0.3
+info:
+  title: Planner API
+  version: 1.0.0
+  description: |
+    The REST API every planner client talks to: the web app in apps/web, and any
+    desktop or mobile app after it. The MCP server does not use it; it calls the
+    Laravel services directly.
+
+    This file is the contract. The TypeScript client in packages/api-client is
+    generated from it, and the backend's tests validate every response they
+    receive against it, so a field added in a Resource without being added here
+    fails the build.
+
+    ## Time
+
+    Two conventions, on purpose:
+
+    - **Planning times** (a task's `start` and `end`, the `from`/`to` filters) are
+      naive wall clock in the planner's timezone, with no offset:
+      `2026-10-26T09:00:00`. Every client then draws the same hours whatever its
+      own machine is set to, and a value read from one endpoint can be sent to
+      another unchanged. `GET /api/me` says which timezone that is. On input, a
+      value that does carry an offset is honoured as given.
+    - **Instants** (something happened: `completed_at`, `last_seen_at`) are UTC,
+      RFC 3339, with a `Z`.
+
+    An all-day span is two dates, `start` inclusive and `end` exclusive, exactly
+    as iCalendar has it.
+
+    ## Authentication
+
+    One account, the same email and password CalDAV uses. The web app signs in
+    with a session cookie: `GET /sanctum/csrf-cookie`, then `POST /api/auth/login`,
+    then send the `XSRF-TOKEN` cookie back as an `X-XSRF-TOKEN` header on every
+    write. Everything else (desktop apps, the iOS Shortcut, scripts) uses a bearer
+    token from `POST /api/auth/tokens` or `php artisan planner:token`.
+
+    ## Envelope
+
+    Successful bodies are `{"data": ...}`. Errors are `{"message": "..."}`, and a
+    422 adds `errors`, keyed by field.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+  - sessionCookie: []
+
+tags:
+  - name: auth
+  - name: tasks
+  - name: feeds
+    description: Subscribed calendars. Read-only, drawn behind the tasks.
+  - name: sync
+    description: What has talked to this server over CalDAV, and what changed.
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Start a browser session
+      description: |
+        Only for the web app, from a domain in SANCTUM_STATEFUL_DOMAINS. Other
+        clients get a 400 and should use `POST /api/auth/tokens`. Rate limited to
+        10 attempts a minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          description: Signed in. The session cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /api/auth/tokens:
+    post:
+      tags: [auth]
+      operationId: createToken
+      summary: Mint a bearer token
+      description: For clients that cannot hold a cookie. The token is shown once.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Credentials'
+                - type: object
+                  required: [device_name]
+                  properties:
+                    device_name:
+                      type: string
+                      maxLength: 100
+                      example: MacBook desktop app
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [token, user]
+                    properties:
+                      token: { type: string }
+                      user: { $ref: '#/components/schemas/User' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End this session, or revoke this token
+      responses:
+        '204': { description: Signed out }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/me:
+    get:
+      tags: [auth]
+      operationId: me
+      summary: The signed-in user, and the settings a client draws with
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [user, timezone, default_duration_min, feed_refresh_min]
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      timezone:
+                        type: string
+                        example: Europe/Prague
+                        description: The zone every planning time is wall clock in.
+                      default_duration_min:
+                        type: integer
+                        description: Block length for a task with no estimate of its own.
+                      feed_refresh_min:
+                        type: integer
+                        description: How far behind a subscribed calendar can be.
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/revision:
+    get:
+      tags: [sync]
+      operationId: revision
+      summary: A fingerprint of everything the planner draws
+      description: |
+        Poll this and refetch when it changes. It covers changes that arrive over
+        CalDAV from a phone, which no request of yours would otherwise reveal.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [revision]
+                    properties:
+                      revision: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: List tasks
+      description: |
+        Filters combine with AND. Order is fixed: scheduled tasks by start, then
+        unscheduled ones by deadline (none last), newest first.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+        - name: from
+          in: query
+          description: Only tasks whose span ends after this. Wall clock.
+          schema: { type: string, example: '2026-10-26T00:00:00' }
+        - name: to
+          in: query
+          description: Only tasks whose span starts before this. Wall clock.
+          schema: { type: string, example: '2026-11-02T00:00:00' }
+        - name: completed_after
+          in: query
+          description: Only tasks completed at or after this. Wall clock.
+          schema: { type: string }
+        - name: tag
+          in: query
+          description: Exact tag match.
+          schema: { type: string, maxLength: 40 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 500 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: Create a task
+      description: |
+        With `start` the task is scheduled straight away; without it, it lands in
+        the inbox. This is also the iOS Shortcut's endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 255 }
+                notes: { type: string, nullable: true }
+                start:
+                  type: string
+                  nullable: true
+                  description: Wall clock, or ISO 8601 with an offset.
+                  example: '2026-10-26T09:00:00'
+                duration_min: { type: integer, minimum: 5, maximum: 1440, nullable: true }
+                deadline: { type: string, format: date, nullable: true }
+                tags:
+                  type: array
+                  nullable: true
+                  items: { type: string, maxLength: 40 }
+      responses:
+        '201': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/tasks/{task}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: Get one task
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [tasks]
+      operationId: updateTask
+      summary: Change a task's details
+      description: |
+        Only the fields here. Where the task sits on the calendar changes through
+        `/schedule` and `/unschedule`. If the task is scheduled, the new title and
+        notes reach the phone on its next sync.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 255 }
+                notes: { type: string, nullable: true }
+                deadline: { type: string, format: date, nullable: true }
+                duration_min: { type: integer, minimum: 5, maximum: 1440, nullable: true }
+                tags:
+                  type: array
+                  nullable: true
+                  items: { type: string, maxLength: 40 }
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [tasks]
+      operationId: deleteTask
+      summary: Delete a task, and its calendar event
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/tasks/{task}/schedule:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: scheduleTask
+      summary: Put a task on the calendar, or move it
+      description: |
+        Scheduling a task that is already scheduled moves it. The length comes
+        from `end` if given, else `duration_min`, else the task's estimate, else
+        the default. The span is always timed afterwards, so this also turns an
+        all-day event from a phone into a timed block.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start]
+              properties:
+                start: { type: string, example: '2026-10-26T09:00:00' }
+                end: { type: string, nullable: true, example: '2026-10-26T10:30:00' }
+                duration_min: { type: integer, minimum: 5, maximum: 1440, nullable: true }
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/tasks/{task}/unschedule:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: unscheduleTask
+      summary: Take a task off the calendar
+      description: The task survives. Unfinished, it returns to the inbox; finished, it stays done.
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/tasks/{task}/complete:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: completeTask
+      summary: Mark a task done
+      description: A scheduled task keeps its slot, and its event title gains the done prefix.
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/tasks/{task}/reopen:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: reopenTask
+      summary: Mark a done task not done
+      responses:
+        '200': { $ref: '#/components/responses/Task' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/feeds:
+    get:
+      tags: [feeds]
+      operationId: listFeeds
+      summary: List subscribed calendars
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Feed' }
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [feeds]
+      operationId: createFeed
+      summary: Subscribe to a calendar
+      description: |
+        Fetches it straight away. A failed first fetch still answers 201 and
+        keeps the subscription; `last_error` on the result says what went wrong.
+        A URL that resolves to a private or tailnet address is refused with 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, color]
+              properties:
+                url:
+                  type: string
+                  maxLength: 2048
+                  description: An iCal URL. `webcal://` is accepted and rewritten.
+                name: { type: string, maxLength: 120, nullable: true }
+                color: { $ref: '#/components/schemas/Color' }
+      responses:
+        '201': { $ref: '#/components/responses/Feed' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/feeds/{feed}:
+    parameters:
+      - $ref: '#/components/parameters/FeedId'
+    patch:
+      tags: [feeds]
+      operationId: updateFeed
+      summary: Rename, recolour, hide or show a subscribed calendar
+      description: A hidden feed is neither drawn nor fetched, but keeps its last payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                color: { $ref: '#/components/schemas/Color' }
+                enabled: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/Feed' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [feeds]
+      operationId: deleteFeed
+      summary: Unsubscribe
+      responses:
+        '204': { description: Removed }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/feeds/{feed}/refresh:
+    parameters:
+      - $ref: '#/components/parameters/FeedId'
+    post:
+      tags: [feeds]
+      operationId: refreshFeed
+      summary: Fetch a subscribed calendar now
+      responses:
+        '200': { $ref: '#/components/responses/Feed' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/feed-events:
+    get:
+      tags: [feeds]
+      operationId: listFeedEvents
+      summary: Occurrences from subscribed calendars in a window
+      description: |
+        Recurrence is expanded for the window and thrown away. Never fetches: it
+        reads the last payload that parsed, so a dead feed cannot slow this down.
+        Includes a couple of days' padding either side of the window.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, example: '2026-10-26T00:00:00' }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, example: '2026-11-02T00:00:00' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FeedEvent' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/sync/clients:
+    get:
+      tags: [sync]
+      operationId: listSyncClients
+      summary: CalDAV clients, most recently seen first
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SyncClient' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/sync/events:
+    get:
+      tags: [sync]
+      operationId: listSyncEvents
+      summary: Recent sync activity, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SyncEvent' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A Sanctum personal access token.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: laravel_session
+      description: Set by POST /api/auth/login. Writes also need the X-XSRF-TOKEN header.
+
+  parameters:
+    TaskId:
+      name: task
+      in: path
+      required: true
+      schema: { type: integer }
+    FeedId:
+      name: feed
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    Task:
+      description: The task, after the change.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data: { $ref: '#/components/schemas/Task' }
+    Feed:
+      description: The feed, after the change.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data: { $ref: '#/components/schemas/Feed' }
+    Error:
+      description: An error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationFailed:
+      description: The request did not validate.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, name, email]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+
+    TaskStatus:
+      type: string
+      enum: [inbox, scheduled, done]
+      description: |
+        `inbox`: no calendar event. `scheduled`: exactly one event carries it.
+        `done`: finished; a finished task keeps its slot on the calendar.
+
+    Task:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - notes
+        - tags
+        - status
+        - done
+        - deadline
+        - duration_min
+        - planned_duration_min
+        - start
+        - end
+        - all_day
+        - completed_at
+        - created_at
+        - updated_at
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        notes: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        done: { type: boolean }
+        deadline:
+          type: string
+          format: date
+          nullable: true
+          description: When it is due. Independent of `start`, which is when you plan to do it.
+        duration_min:
+          type: integer
+          nullable: true
+          description: The estimate the user gave, if any.
+        planned_duration_min:
+          type: integer
+          description: The block length scheduling will use. The estimate, or the default.
+        start:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$'
+          description: Wall clock, or a date when `all_day`. Null when not on the calendar.
+          example: '2026-10-26T09:00:00'
+        end:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$'
+          description: Exclusive. Wall clock, or a date when `all_day`.
+          example: '2026-10-26T09:30:00'
+        all_day:
+          type: boolean
+          description: Only ever true for an event made on a device. Clients only create timed blocks.
+        completed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    Color:
+      type: string
+      pattern: '^#[0-9a-fA-F]{6}$'
+      example: '#4f6d9a'
+
+    Feed:
+      type: object
+      additionalProperties: false
+      description: A subscribed calendar. The URL is never returned; it is a credential.
+      required:
+        - id
+        - name
+        - color
+        - enabled
+        - healthy
+        - status_line
+        - refresh_min
+        - series_count
+        - dropped_count
+        - payload_bytes
+        - last_status
+        - last_error
+        - last_fetched_at
+        - last_success_at
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        color: { $ref: '#/components/schemas/Color' }
+        enabled: { type: boolean }
+        healthy:
+          type: boolean
+          description: False when the last attempt failed or the data is more than two intervals old.
+        status_line:
+          type: string
+          description: One human sentence about the feed's state.
+          example: checked 5 minutes ago · 12 series
+        refresh_min: { type: integer }
+        series_count: { type: integer, nullable: true }
+        dropped_count:
+          type: integer
+          nullable: true
+          description: Recurring series this server could not expand.
+        payload_bytes: { type: integer, nullable: true }
+        last_status: { type: integer, nullable: true }
+        last_error: { type: string, nullable: true }
+        last_fetched_at: { type: string, format: date-time, nullable: true }
+        last_success_at: { type: string, format: date-time, nullable: true }
+
+    FeedEvent:
+      type: object
+      additionalProperties: false
+      description: One occurrence from a subscribed calendar. Read-only.
+      required: [id, feed_id, feed_name, color, title, location, busy, all_day, start, end]
+      properties:
+        id:
+          type: string
+          description: Never numeric, so it cannot be mistaken for a task id.
+          example: feed-3-1a2b3c4d5e6f
+        feed_id: { type: integer }
+        feed_name: { type: string }
+        color: { $ref: '#/components/schemas/Color' }
+        title: { type: string }
+        location: { type: string, nullable: true }
+        busy: { type: boolean }
+        all_day: { type: boolean }
+        start:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$'
+        end:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$'
+
+    SyncClient:
+      type: object
+      additionalProperties: false
+      required: [id, agent, healthy, last_seen_at, last_method, last_status, request_count]
+      properties:
+        id: { type: integer }
+        agent:
+          type: string
+          description: The shortened User-Agent, e.g. iOS/26.1.
+        healthy: { type: boolean }
+        last_seen_at: { type: string, format: date-time }
+        last_method: { type: string, nullable: true }
+        last_status: { type: integer, nullable: true }
+        request_count: { type: integer }
+
+    SyncEvent:
+      type: object
+      additionalProperties: false
+      required: [id, kind, source, client, task_id, title, detail, sentence, failure, occurred_at]
+      properties:
+        id: { type: integer }
+        kind:
+          type: string
+          example: moved
+        source:
+          type: string
+          enum: [caldav, planner, feed]
+        client: { type: string, nullable: true }
+        task_id: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        sentence:
+          type: string
+          description: What happened, phrased for a person.
+          example: moved from iOS/26.1
+        failure: { type: boolean }
+        occurred_at: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }

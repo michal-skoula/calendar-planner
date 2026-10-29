@@ -1,0 +1,23 @@
+{
+    "name": "@planner/api-client",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Typed client for the planner REST API, generated from apps/api/openapi.yaml.",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "generate": "openapi-typescript ../../apps/api/openapi.yaml -o src/schema.d.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "openapi-fetch": "^0.14.0"
+    },
+    "devDependencies": {
+        "openapi-typescript": "^7.9.1",
+        "typescript": "~5.9.3"
+    }
+}

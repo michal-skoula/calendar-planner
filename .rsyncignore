@@ -1,8 +1,11 @@
 .git/
+.claude/
+.idea/
 node_modules/
 vendor/
-public/build/
-public/hot
+dist/
+apps/api/public/index.html
+apps/api/public/assets/
 storage/logs/
 storage/framework/cache/data/
 storage/framework/sessions/
@@ -12,4 +15,5 @@ bootstrap/cache/services.php
 database/database.sqlite
 .env
 .env.backup
+.env.preview
 .phpunit.result.cache

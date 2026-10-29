@@ -1,0 +1,11 @@
+[Unit]
+Description=Re-fetch the planner's subscribed calendars
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The container runs no cron and no queue worker, so the schedule lives out
+# here. The command itself skips any feed that is not due yet, which is why this
+# can fire more often than any feed's own refresh interval.
+ExecStart=/usr/bin/docker compose -f /opt/planner/compose.yml exec -T planner php artisan planner:feeds:refresh

@@ -1,21 +1,21 @@
 {
-    "$schema": "https://www.schemastore.org/package.json",
+    "name": "planner",
     "private": true,
     "type": "module",
+    "workspaces": [
+        "apps/web",
+        "packages/*"
+    ],
     "scripts": {
-        "build": "vite build",
-        "dev": "vite"
+        "dev": "concurrently -k -n api,web -c gray,blue \"npm:dev:api\" \"npm:dev:web\"",
+        "dev:api": "cd apps/api && php artisan serve --port=8100",
+        "dev:web": "npm run dev -w @planner/web",
+        "build": "npm run generate && npm run build -w @planner/web",
+        "generate": "npm run generate -w @planner/api-client",
+        "typecheck": "npm run typecheck --workspaces --if-present",
+        "test": "cd apps/api && php artisan test"
     },
     "devDependencies": {
-        "@fullcalendar/core": "^6.1.15",
-        "@fullcalendar/daygrid": "^6.1.15",
-        "@fullcalendar/interaction": "^6.1.15",
-        "@fullcalendar/timegrid": "^6.1.15",
-        "@tailwindcss/vite": "^4.0.0",
-        "axios": "^1.11.0",
-        "concurrently": "^9.0.1",
-        "laravel-vite-plugin": "^2.0.0",
-        "tailwindcss": "^4.0.0",
-        "vite": "^7.0.7"
+        "concurrently": "^9.2.1"
     }
 }

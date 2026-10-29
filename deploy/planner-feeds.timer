@@ -1,0 +1,13 @@
+[Unit]
+Description=Re-fetch the planner's subscribed calendars
+
+[Timer]
+OnCalendar=*:0/15
+# Spread the load: several people subscribing to the same provider on the
+# quarter hour is how a feed URL earns a rate limit.
+RandomizedDelaySec=120
+# A fetch missed while the box was off is worth doing once on the way back up.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
